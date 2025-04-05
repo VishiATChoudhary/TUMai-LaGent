@@ -33,6 +33,7 @@ boto3 = ">=1.34.0"
 ipykernel = "^6.29.5"
 langchain-community = "^0.3.21"
 langchain-experimental = "^0.3.4"
+html5lib = "^1.1"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
