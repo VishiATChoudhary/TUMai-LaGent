@@ -1,12 +1,21 @@
 import asyncio
+import os
+from dotenv import load_dotenv
 from agents import create_agent_system
 
 async def main():
-    # Replace with your Mistral API key
-    MISTRAL_API_KEY = "mgNvjI0hi3WcPdMvPMVgy8LKQFQhVtBx"
+    # Load environment variables
+    load_dotenv()
     
-    # Create the agent system
-    agent_system = create_agent_system(MISTRAL_API_KEY)
+    # Get API keys from environment variables
+    MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
+    TAVILY_API_KEY = os.getenv("TAVILY_API_KEY")
+    
+    # Create the agent system with both API keys
+    agent_system = create_agent_system(
+        mistral_api_key=MISTRAL_API_KEY,
+        tavily_api_key=TAVILY_API_KEY
+    )
     
     # Test messages for different scenarios
     test_messages = [
