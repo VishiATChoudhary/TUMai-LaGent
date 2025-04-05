@@ -1,34 +1,32 @@
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-from typing import Optional
-import os
-from dotenv import load_dotenv
+import asyncio
+from agents import create_agent_system
 
-# Load environment variables
-load_dotenv()
-
-app = FastAPI(
-    title="TUM.ai ESSEC Backend",
-    description="Backend API with FastAPI, LangChain, and NeMo integration",
-    version="1.0.0"
-)
-
-class Query(BaseModel):
-    text: str
-    model: Optional[str] = "nemo"
-
-@app.get("/")
-async def root():
-    return {"message": "Welcome to TUM.ai ESSEC Backend API"}
-
-@app.post("/query")
-async def process_query(query: Query):
-    try:
-        # TODO: Implement NeMo wrapper and LangChain integration
-        return {"response": f"Processed query: {query.text} with model: {query.model}"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+async def main():
+    # Replace with your Mistral API key
+    MISTRAL_API_KEY = "mgNvjI0hi3WcPdMvPMVgy8LKQFQhVtBx"
+    
+    # Create the agent system
+    agent_system = create_agent_system(MISTRAL_API_KEY)
+    
+    # Test messages for different scenarios
+    test_messages = [
+        "Can you check if the heating system in apartment 3B is working properly? It's been making strange noises.",
+        "What's the current value of the property at 123 Main Street?",
+        "I need help generating a tax report for Q2 2023 for all my rental properties."
+    ]
+    
+    # Process each test message
+    for message in test_messages:
+        print(f"\nProcessing message: {message}")
+        print("-" * 50)
+        
+        # Process the message through the agent system
+        result = await agent_system.process_message(message)
+        
+        # Print the final response
+        if len(result["messages"]) > 1:
+            print("Final response:", result["messages"][-1].content)
+        print("-" * 50)
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000) 
+    asyncio.run(main()) 
