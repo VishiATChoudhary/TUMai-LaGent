@@ -19,9 +19,9 @@ async def main():
     
     # Test messages for different scenarios
     test_messages = [
-        "Can you check if the heating system in apartment 3B is working properly? It's been making strange noises.",
-        "What's the current value of the property at 123 Main Street?",
-        "I need help generating a tax report for Q2 2023 for all my rental properties."
+        "My sink is clogged and all the water is overflowing? It's been making strange noises, Düsseldorf, Germany",
+#        "What's the current value of the property at 123 Main Street?",
+#        "I need help generating a tax report for Q2 2023 for all my rental properties."
     ]
     
     # Process each test message

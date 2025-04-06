@@ -129,6 +129,31 @@ class Maintenance(BaseAgent):
             
         self.worker_contact = MaintenanceWorkerContact(contact_email)
 
+    def _extract_location(self, message: str) -> str:
+        """Extract location from message content"""
+        # This is a simple implementation - in a real system, you would use NLP to extract the location
+        # For now, we'll look for common location indicators
+        location_indicators = ["at", "in", "near", "around"]
+        words = message.lower().split()
+        for i, word in enumerate(words):
+            if word in location_indicators and i + 1 < len(words):
+                return words[i + 1]
+        return "current location"  # Fallback if no location found
+
+    def _generate_search_query(self, message: str, location: str) -> str:
+        """Generate a specific search query for maintenance workers using LLM"""
+        search_prompt = ChatPromptTemplate.from_messages([
+            ("system", """You are a helpful assistant that formulates specific search queries for finding maintenance workers.
+            Based on the user's request and location, create a detailed search query that will help find the most relevant maintenance workers.
+            Include specific skills, services, or specializations mentioned in the request.
+            Format: Return ONLY the search query string, nothing else."""),
+            ("human", f"User request: {message}\nLocation: {location}")
+        ])
+        
+        chain = LLMChain(llm=self.llm, prompt=search_prompt)
+        result = chain.invoke({"input": message})
+        return result["text"].strip()
+
     def process(self, messages: List[BaseMessage], metadata: Dict[str, Any] = None) -> Dict[str, Any]:
         # Use tools before processing with LLM
         enhanced_input = self._use_tools(messages[-1].content)
@@ -136,12 +161,16 @@ class Maintenance(BaseAgent):
         # Process with LLM to determine if we need to search for workers or contact them
         result = self.chain.invoke({"input": enhanced_input})
         llm_response = result["text"]
+        print("LLM response:", llm_response)
         
         # Check if the response indicates a need to search for workers
-        if "search" in llm_response.lower() and self.worker_searcher:
-            # Extract location from the response (this is a simple implementation)
-            location = "current location"  # In a real system, you would extract this from the message
-            search_result = self.worker_searcher.search_workers(location)
+        if "search for maintenance workers" in llm_response.lower() and self.worker_searcher:
+            # Extract location from the message
+            location = self._extract_location(messages[-1].content)
+            # Generate a specific search query
+            search_query = self._generate_search_query(messages[-1].content, location)
+            print(f"Generated search query: {search_query}")
+            search_result = self.worker_searcher.search_workers(search_query)
             llm_response += f"\n\n{search_result}"
             
         # Check if the response indicates a need to contact workers
@@ -214,6 +243,7 @@ class AgentSystem:
 
             # Step 3: Router
             route = self.router.process(state["messages"], state["metadata"])
+            print("Route:", route)
 
             # Step 4: Route to specific agent
             if route == "asset_expert":
