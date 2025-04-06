@@ -161,6 +161,8 @@ export default function Messages() {
   const [activeTab, setActiveTab] = useState("all");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showMaintenanceDialog, setShowMaintenanceDialog] = useState(false);
+  const [isScrapingLocations, setIsScrapingLocations] = useState(false);
+  const [selectedMaintenanceWorker, setSelectedMaintenanceWorker] = useState<any>(null);
   const [messages, setMessages] = useState<Message[]>(messagesData);
   
   const { data: categorizerResults, isLoading: categorizerLoading, error: categorizerError } = useCategorizerResults();
@@ -193,24 +195,26 @@ export default function Messages() {
 
   const handleMessageClick = (message: Message) => {
     setSelectedMessage(message);
-    if (message.category.toLowerCase() === "maintenance" && 
-        message.timestamp.toLowerCase() === "just now") {
-      setShowMaintenanceDialog(true);
-    }
   };
 
-  const handleMaintenanceSelect = (option: any) => {
+  const handleMaintenanceSelect = async (option: any) => {
     if (selectedMessage) {
-      // Update the message status to "done"
-      const updatedMessages = messages.map(msg => 
-        msg.id === selectedMessage.id 
-          ? { ...msg, status: "done" as const } 
-          : msg
-      );
-      setMessages(updatedMessages);
-      setSelectedMessage({ ...selectedMessage, status: "done" });
-      toast.success(`Assigned to ${option.name}`);
-      setShowMaintenanceDialog(false);
+      try {
+        setSelectedMaintenanceWorker(option);
+        // Update the message status to "done"
+        const updatedMessages = messages.map(msg => 
+          msg.id === selectedMessage.id 
+            ? { ...msg, status: "done" as const } 
+            : msg
+        );
+        setMessages(updatedMessages);
+        setSelectedMessage({ ...selectedMessage, status: "done" });
+        setShowMaintenanceDialog(false);
+        toast.success('Maintenance request processed successfully');
+      } catch (error) {
+        console.error('Error handling maintenance:', error);
+        toast.error('Failed to process maintenance request');
+      }
     }
   };
 
@@ -228,13 +232,24 @@ export default function Messages() {
     }
   };
 
+  const handleScheduleMaintenance = async () => {
+    if (selectedMessage) {
+      setIsScrapingLocations(true);
+      // Simulate scraping locations for 2-4 seconds
+      const delay = Math.floor(Math.random() * (4000 - 2000 + 1)) + 2000;
+      await new Promise(resolve => setTimeout(resolve, delay));
+      setIsScrapingLocations(false);
+      setShowMaintenanceDialog(true);
+    }
+  };
+
   // Combine mock data with categorizer results
   const allMessages = [
     ...messages,
     ...(categorizerResults?.map(result => ({
       id: result.id,
       tenant: {
-        name: "Alexandre Kessler",
+        name: "Sarah Smith",
         initials: "AK",
         avatar: undefined
       },
@@ -258,6 +273,24 @@ export default function Messages() {
       
     if (activeTab === "all") return matchesSearch;
     return message.status === activeTab && matchesSearch;
+  }).sort((a, b) => {
+    // First sort by priority
+    const priorityOrder = { high: 0, medium: 1, low: 2 };
+    const priorityDiff = priorityOrder[a.priority] - priorityOrder[b.priority];
+    
+    if (priorityDiff !== 0) return priorityDiff;
+    
+    // If priorities are equal, sort by timestamp
+    // Convert timestamps to a comparable format
+    const getTimeValue = (timestamp: string) => {
+      if (timestamp.includes("just now")) return 0;
+      if (timestamp.includes("minute")) return 1;
+      if (timestamp.includes("hour")) return 2;
+      if (timestamp.includes("day")) return 3;
+      return 4;
+    };
+    
+    return getTimeValue(a.timestamp) - getTimeValue(b.timestamp);
   });
 
   if (categorizerError) {
@@ -493,9 +526,11 @@ export default function Messages() {
                     <Button className="bg-accent-blue hover:bg-accent-blue/90">
                       Send Reply
                     </Button>
-                    <Button variant="outline">
-                      Schedule Maintenance
-                    </Button>
+                    {selectedMessage.category.toLowerCase() === "maintenance" && (
+                      <Button variant="outline" onClick={handleScheduleMaintenance}>
+                        Schedule Maintenance
+                      </Button>
+                    )}
                     <Button variant="outline">
                       Mark as Resolved
                     </Button>
@@ -521,6 +556,14 @@ export default function Messages() {
         onSelect={handleMaintenanceSelect}
         onDismiss={handleMaintenanceDismiss}
       />
+      {isScrapingLocations && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center">
+          <div className="bg-white p-6 rounded-lg shadow-lg flex flex-col items-center gap-4">
+            <RefreshCw className="h-8 w-8 animate-spin text-accent-blue" />
+            <p className="text-lg font-medium">Scraping locations in the vicinity...</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
