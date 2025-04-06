@@ -8,6 +8,13 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain.tools import Tool
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_experimental.utilities import PythonREPL
+from pathlib import Path
+from maintenance_agents import MaintenanceWorkerSearcher, MaintenanceWorkerContact
+
+
+def read_prompt(prompt_file: str) -> str:
+    prompt_path = Path(__file__).parent / "prompts" / prompt_file
+    return prompt_path.read_text().strip()
 
 class BaseAgent:
     def __init__(self, llm):
@@ -62,7 +69,7 @@ class Categorizer(BaseAgent):
         self.chain = LLMChain(
             llm=llm,
             prompt=ChatPromptTemplate.from_messages([
-                ("system", "Categorize this message into one of: maintenance, asset, taxation, general"),
+                ("system", read_prompt("categorizer.txt")),
                 ("human", "{input}")
             ])
         )
@@ -90,7 +97,7 @@ class AssetExpert(BaseAgent):
         self.chain = LLMChain(
             llm=llm,
             prompt=ChatPromptTemplate.from_messages([
-                ("system", "You are an expert in property assets. Answer the query professionally."),
+                ("system", read_prompt("asset_expert.txt")),
                 ("human", "{input}")
             ])
         )
@@ -104,22 +111,49 @@ class AssetExpert(BaseAgent):
         return {"messages": messages, "metadata": metadata or {}}
 
 class Maintenance(BaseAgent):
-    def __init__(self, llm):
+    def __init__(self, llm, tavily_api_key: str = None, contact_email: str = "vishisht.0902@gmail.com"):
         super().__init__(llm)
         self.chain = LLMChain(
             llm=llm,
             prompt=ChatPromptTemplate.from_messages([
-                ("system", "You are a maintenance expert. Provide solution options for the issue."),
+                ("system", read_prompt("maintenance.txt")),
                 ("human", "{input}")
             ])
         )
+        
+        # Initialize sub-agents
+        if tavily_api_key:
+            self.worker_searcher = MaintenanceWorkerSearcher(tavily_api_key)
+        else:
+            self.worker_searcher = None
+            
+        self.worker_contact = MaintenanceWorkerContact(contact_email)
 
     def process(self, messages: List[BaseMessage], metadata: Dict[str, Any] = None) -> Dict[str, Any]:
         # Use tools before processing with LLM
         enhanced_input = self._use_tools(messages[-1].content)
+        
+        # Process with LLM to determine if we need to search for workers or contact them
         result = self.chain.invoke({"input": enhanced_input})
+        llm_response = result["text"]
+        
+        # Check if the response indicates a need to search for workers
+        if "search" in llm_response.lower() and self.worker_searcher:
+            # Extract location from the response (this is a simple implementation)
+            location = "current location"  # In a real system, you would extract this from the message
+            search_result = self.worker_searcher.search_workers(location)
+            llm_response += f"\n\n{search_result}"
+            
+        # Check if the response indicates a need to contact workers
+        if "contact" in llm_response.lower():
+            email_result = self.worker_contact.send_email(
+                subject="Maintenance Request",
+                message=f"Maintenance request details:\n{llm_response}"
+            )
+            llm_response += f"\n\n{email_result}"
+        
         messages = list(messages)
-        messages.append(AIMessage(content=result["text"]))
+        messages.append(AIMessage(content=llm_response))
         return {"messages": messages, "metadata": metadata or {}}
 
 class TaxationReportGenerator(BaseAgent):
@@ -128,7 +162,7 @@ class TaxationReportGenerator(BaseAgent):
         self.chain = LLMChain(
             llm=llm,
             prompt=ChatPromptTemplate.from_messages([
-                ("system", "You are a taxation expert. Generate a summary report."),
+                ("system", read_prompt("taxation.txt")),
                 ("human", "{input}")
             ])
         )
@@ -155,7 +189,7 @@ class AgentSystem:
         self.categorizer = Categorizer(self.llm)
         self.router = Router()
         self.asset_expert = AssetExpert(self.llm)
-        self.maintenance = Maintenance(self.llm)
+        self.maintenance = Maintenance(self.llm, tavily_api_key, "vishisht.0902@gmail.com")
         self.taxation = TaxationReportGenerator(self.llm)
 
         # Add tools to relevant agents
