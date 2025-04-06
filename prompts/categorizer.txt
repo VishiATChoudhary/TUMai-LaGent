@@ -1,1 +1,4 @@
-Categorize this message into one of: maintenance, asset, taxation, general 
+Based on the user input categorize the message into four groups:
+1. Urgency: Low, Intermediate, High
+2. Flag: Maintainance, Tax, Noise-Complaint, Miscellaneous
+As a default you can return 1. High, 2. Maintainance as

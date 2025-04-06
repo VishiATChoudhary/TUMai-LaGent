@@ -11,12 +11,14 @@ import requests
 import json
 from geopy.distance import geodesic
 from geopy.geocoders import Nominatim
+from supabase_client import SupabaseClient
 
 class MaintenanceWorkerSearcher:
     
     def __init__(self, *args, **kwargs):
         self.serp_api_key = "2eaa4f82052b7de1b24e311fb2caf6a8aa01ae1d90f0ee7c7d781328617cd1af"
         self.api_url = "https://serpapi.com/search"
+        self.supabase_client = SupabaseClient()
         
     def search_workers(self, query: str) -> str:
         """Search for maintenance workers using SerpAPI with Google Maps"""
@@ -72,6 +74,9 @@ class MaintenanceWorkerSearcher:
                         })
                 
                 workers.append(worker)
+            
+            # Store results in Supabase
+            self.supabase_client.store_search_results(query, workers)
             
             if not workers:
                 return f"No maintenance workers found matching the query: {query}"

@@ -10,6 +10,8 @@ from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_experimental.utilities import PythonREPL
 from pathlib import Path
 from maintenance_agents import MaintenanceWorkerSearcher, MaintenanceWorkerContact
+from supabase import create_client, Client
+import os
 
 
 def read_prompt(prompt_file: str) -> str:
@@ -63,8 +65,30 @@ class Accumulator(BaseAgent):
         self.blob_storage.append(messages[-1])
         return {"messages": messages, "metadata": metadata or {}}
 
+class CategorizerResultSaver:
+    def __init__(self, supabase_url: str, supabase_key: str):
+        self.supabase: Client = create_client(supabase_url, supabase_key)
+        
+    def save_result(self, message_content: str, flag: str, urgency: str):
+        """Save categorizer result to Supabase"""
+        try:
+            # Convert message content to string if it's a list
+            if isinstance(message_content, list):
+                message_content = "\n".join([msg.content for msg in message_content])
+                
+            result = self.supabase.table('categorizer_results').insert({
+                'message_content': message_content,
+                'flag': flag,
+                'urgency': urgency
+            }).execute()
+            print(f"Successfully saved result to Supabase: {result}")
+            return result
+        except Exception as e:
+            print(f"Error saving categorizer result: {str(e)}")
+            return None
+
 class Categorizer(BaseAgent):
-    def __init__(self, llm):
+    def __init__(self, llm, supabase_url: str = None, supabase_key: str = None):
         super().__init__(llm)
         self.chain = LLMChain(
             llm=llm,
@@ -73,22 +97,64 @@ class Categorizer(BaseAgent):
                 ("human", "{input}")
             ])
         )
+        if supabase_url and supabase_key:
+            print("Categorizer initialized with Supabase")
+            self.result_saver = CategorizerResultSaver(supabase_url, supabase_key)
+        else:
+            self.result_saver = None
 
     def process(self, messages: List[BaseMessage], metadata: Dict[str, Any] = None) -> Dict[str, Any]:
         metadata = metadata or {}
-        result = self.chain.invoke({"input": messages[-1].content})
-        metadata["category"] = result["text"].strip().lower()
+        print("Messages:", messages)
+        result = self.chain.invoke({"input": messages})
+        print('categorizer result:', result)
+        response = result["text"].strip().lower()
+        print('categorizer response:', response)
+        # Extract flag and urgency from the response
+        # The response should be in the format: "flag: [flag], urgency: [urgency]"
+        flag = "miscellaneous"  # default
+        urgency = "low"  # default
+        
+        if "maintenance" in response:
+            flag = "maintenance"
+        elif "tax" in response:
+            flag = "tax"
+        elif "noise" in response:
+            flag = "noise-complaint"
+            
+        if "high" in response:
+            urgency = "high"
+        elif "intermediate" in response:
+            urgency = "intermediate"
+
+            
+        metadata["category"] = flag  # Keep for backward compatibility
+        metadata["urgency"] = urgency
+        
+        # Save result to Supabase if result_saver is configured
+        if self.result_saver:
+            self.result_saver.save_result(
+                message_content=messages,
+                flag=flag,
+                urgency=urgency
+            )
+            
         return {"messages": messages, "metadata": metadata}
 
 class Router:
     def process(self, messages: List[BaseMessage], metadata: Dict[str, Any] = None) -> str:
         category = metadata.get("category", "").lower()
-        if "maintenance" in category:
+        main_prompt = messages[-1].content if messages else ""
+        
+        # Use both category and main prompt for routing
+        if "maintenance" in category or "maintenance" in main_prompt.lower():
             return "maintenance"
-        elif "asset" in category:
+        elif "asset" in category or "asset" in main_prompt.lower():
             return "asset_expert"
-        elif "tax" in category:
+        elif "tax" in category or "tax" in main_prompt.lower():
             return "taxation"
+        elif "email" in category or "email" in main_prompt.lower():
+            return "email_drafter"
         return "general"
 
 class AssetExpert(BaseAgent):
@@ -204,8 +270,46 @@ class TaxationReportGenerator(BaseAgent):
         messages.append(AIMessage(content=result["text"]))
         return {"messages": messages, "metadata": metadata or {}}
 
+class EmailDrafter(BaseAgent):
+    def __init__(self, llm):
+        super().__init__(llm)
+        self.chain = LLMChain(
+            llm=llm,
+            prompt=ChatPromptTemplate.from_messages([
+                ("system", read_prompt("email_drafter.txt")),
+                ("human", "{input}")
+            ])
+        )
+
+    def process(self, messages: List[BaseMessage], metadata: Dict[str, Any] = None) -> Dict[str, Any]:
+        metadata = metadata or {}
+        
+        # Extract maintenance worker info and issue details from metadata
+        worker_info = metadata.get("selected_worker", {})
+        issue_details = metadata.get("issue_details", {})
+        
+        # Prepare input for the LLM
+        input_data = {
+            "worker_name": worker_info.get("name", ""),
+            "worker_type": worker_info.get("type", ""),
+            "worker_rating": worker_info.get("rating", ""),
+            "issue_description": issue_details.get("description", ""),
+            "issue_urgency": issue_details.get("urgency", ""),
+            "property_location": issue_details.get("location", ""),
+            "tenant_name": issue_details.get("tenant_name", "")
+        }
+        
+        # Generate email draft
+        result = self.chain.invoke({"input": input_data})
+        email_draft = result["text"]
+        
+        # Update metadata with the email draft
+        metadata["email_draft"] = email_draft
+        
+        return {"messages": messages, "metadata": metadata}
+
 class AgentSystem:
-    def __init__(self, mistral_api_key: str, tavily_api_key: str = None):
+    def __init__(self, mistral_api_key: str, tavily_api_key: str = None, supabase_url: str = None, supabase_key: str = None):
         self.llm = ChatMistralAI(mistral_api_key=mistral_api_key)
         
         # Initialize tools
@@ -215,17 +319,19 @@ class AgentSystem:
         
         # Initialize agents
         self.accumulator = Accumulator()
-        self.categorizer = Categorizer(self.llm)
+        self.categorizer = Categorizer(self.llm, supabase_url, supabase_key)
         self.router = Router()
         self.asset_expert = AssetExpert(self.llm)
         self.maintenance = Maintenance(self.llm, tavily_api_key, "vishisht.0902@gmail.com")
         self.taxation = TaxationReportGenerator(self.llm)
+        self.email_drafter = EmailDrafter(self.llm)
 
         # Add tools to relevant agents
         for tool in self.tools:
             self.asset_expert.add_tool(tool)
             self.maintenance.add_tool(tool)
             self.taxation.add_tool(tool)
+            self.email_drafter.add_tool(tool)
 
     async def process_message(self, message: str) -> Dict[str, Any]:
         # Initialize state
@@ -239,9 +345,10 @@ class AgentSystem:
             state = self.accumulator.process(state["messages"], state["metadata"])
 
             # Step 2: Categorizer
+            print("Categorizer:", state["metadata"])
             state = self.categorizer.process(state["messages"], state["metadata"])
 
-            # Step 3: Router
+            # Step 3: Router (now has access to both category and main prompt)
             route = self.router.process(state["messages"], state["metadata"])
             print("Route:", route)
 
@@ -252,6 +359,8 @@ class AgentSystem:
                 state = self.maintenance.process(state["messages"], state["metadata"])
             elif route == "taxation":
                 state = self.taxation.process(state["messages"], state["metadata"])
+            elif route == "email_drafter":
+                state = self.email_drafter.process(state["messages"], state["metadata"])
 
             return state
         except Exception as e:
@@ -262,5 +371,5 @@ class AgentSystem:
                 "error": str(e)
             }
 
-def create_agent_system(mistral_api_key: str, tavily_api_key: str = None) -> AgentSystem:
-    return AgentSystem(mistral_api_key, tavily_api_key) 
+def create_agent_system(mistral_api_key: str, tavily_api_key: str = None, supabase_url: str = None, supabase_key: str = None) -> AgentSystem:
+    return AgentSystem(mistral_api_key, tavily_api_key, supabase_url, supabase_key) 

@@ -18,8 +18,13 @@ import {
   CheckCircle2,
   Clock,
   AlertTriangle,
+  RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import { useCategorizerResults } from "@/hooks/useCategorizerResults";
+import { useMaintenanceResults } from "@/hooks/useMaintenanceResults";
+import { MaintenanceDialog } from "@/components/MaintenanceDialog";
 
 interface Message {
   id: string;
@@ -153,10 +158,98 @@ const priorityConfig = {
 export default function Messages() {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
-  
   const [activeTab, setActiveTab] = useState("all");
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [showMaintenanceDialog, setShowMaintenanceDialog] = useState(false);
+  const [messages, setMessages] = useState<Message[]>(messagesData);
   
-  const filteredMessages = messagesData.filter((message) => {
+  const { data: categorizerResults, isLoading: categorizerLoading, error: categorizerError } = useCategorizerResults();
+  const { data: maintenanceResults, isLoading: maintenanceLoading } = useMaintenanceResults();
+
+  const handleRefresh = async () => {
+    try {
+      setIsRefreshing(true);
+      const response = await fetch('http://localhost:8000/refresh', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      const data = await response.json();
+      
+      if (data.status === 'success') {
+        toast.success('Messages refreshed successfully');
+      } else {
+        toast.error('Failed to refresh messages');
+      }
+    } catch (error) {
+      toast.error('Error connecting to the server');
+      console.error('Error:', error);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const handleMessageClick = (message: Message) => {
+    setSelectedMessage(message);
+    if (message.category.toLowerCase() === "maintenance" && 
+        message.timestamp.toLowerCase() === "just now") {
+      setShowMaintenanceDialog(true);
+    }
+  };
+
+  const handleMaintenanceSelect = (option: any) => {
+    if (selectedMessage) {
+      // Update the message status to "done"
+      const updatedMessages = messages.map(msg => 
+        msg.id === selectedMessage.id 
+          ? { ...msg, status: "done" as const } 
+          : msg
+      );
+      setMessages(updatedMessages);
+      setSelectedMessage({ ...selectedMessage, status: "done" });
+      toast.success(`Assigned to ${option.name}`);
+      setShowMaintenanceDialog(false);
+    }
+  };
+
+  const handleMaintenanceDismiss = () => {
+    if (selectedMessage) {
+      // Update the message status to "done"
+      const updatedMessages = messages.map(msg => 
+        msg.id === selectedMessage.id 
+          ? { ...msg, status: "done" as const } 
+          : msg
+      );
+      setMessages(updatedMessages);
+      setSelectedMessage({ ...selectedMessage, status: "done" });
+      setShowMaintenanceDialog(false);
+    }
+  };
+
+  // Combine mock data with categorizer results
+  const allMessages = [
+    ...messages,
+    ...(categorizerResults?.map(result => ({
+      id: result.id,
+      tenant: {
+        name: "Alexandre Kessler",
+        initials: "AK",
+        avatar: undefined
+      },
+      property: "System Message",
+      category: result.flag,
+      message: result.message_content,
+      timestamp: "Just Now",
+      status: "new" as const,
+      priority: result.urgency === "high" ? "high" as const : 
+               result.urgency === "intermediate" ? "medium" as const : 
+               "low" as const,
+    } satisfies Message)) || [])
+  ];
+
+  const filteredMessages = allMessages.filter((message) => {
     const matchesSearch = 
       message.tenant.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       message.property.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -167,11 +260,26 @@ export default function Messages() {
     return message.status === activeTab && matchesSearch;
   });
 
+  if (categorizerError) {
+    toast.error('Error loading categorizer results');
+  }
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold text-charcoal">Messages</h1>
-        <p className="text-medium-gray mt-1">Manage tenant communication</p>
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-3xl font-bold text-charcoal">Messages</h1>
+          <p className="text-medium-gray mt-1">Manage tenant communication</p>
+        </div>
+        <Button 
+          variant="outline" 
+          onClick={handleRefresh}
+          disabled={isRefreshing || categorizerLoading}
+          className="flex items-center gap-2"
+        >
+          <RefreshCw className={cn("h-4 w-4", (isRefreshing || categorizerLoading) && "animate-spin")} />
+          <span>Refresh Messages</span>
+        </Button>
       </div>
 
       <div className="flex flex-col sm:flex-row gap-4">
@@ -202,7 +310,15 @@ export default function Messages() {
         <TabsContent value={activeTab} className="mt-4">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-5 xl:col-span-4 space-y-4">
-              {filteredMessages.length > 0 ? (
+              {categorizerLoading ? (
+                <div className="flex flex-col items-center justify-center p-8 text-center border rounded-lg bg-white">
+                  <RefreshCw className="h-12 w-12 text-muted-foreground mb-3 animate-spin" />
+                  <h3 className="font-medium text-lg mb-1">Loading messages...</h3>
+                  <p className="text-sm text-medium-gray">
+                    Please wait while we fetch your messages
+                  </p>
+                </div>
+              ) : filteredMessages.length > 0 ? (
                 <div className="h-[calc(3*200px)] overflow-y-auto pr-2 space-y-4">
                   {filteredMessages.map((message) => {
                     const StatusIcon = statusConfig[message.status].icon;
@@ -214,7 +330,7 @@ export default function Messages() {
                           "cursor-pointer transition-all hover:border-accent-blue hover:bg-accent-blue/5",
                           selectedMessage?.id === message.id && "border-accent-blue shadow-sm"
                         )}
-                        onClick={() => setSelectedMessage(message)}
+                        onClick={() => handleMessageClick(message)}
                       >
                         <CardHeader className="p-4 pb-2">
                           <div className="flex justify-between items-start">
@@ -398,6 +514,13 @@ export default function Messages() {
           </div>
         </TabsContent>
       </Tabs>
+      <MaintenanceDialog 
+        open={showMaintenanceDialog}
+        onOpenChange={setShowMaintenanceDialog}
+        maintenanceOptions={maintenanceResults || []}
+        onSelect={handleMaintenanceSelect}
+        onDismiss={handleMaintenanceDismiss}
+      />
     </div>
   );
 }
