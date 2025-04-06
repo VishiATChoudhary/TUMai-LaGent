@@ -54,6 +54,11 @@ The system integrates with several external tools and services:
 - **Supabase**: For storing categorizer results and other data
 - **Email Service**: For sending notifications and communications
 - **Python REPL**: For executing code when needed
+- **Speech-to-Text Model**: For converting voice messages into text, enabling voice-based interactions with the system. This allows users to:
+  - Record voice messages for maintenance requests
+  - Dictate property-related queries
+  - Provide hands-free interaction with the system
+  - Access the system's capabilities through voice commands
 
 ### Frontend Implementation
 
