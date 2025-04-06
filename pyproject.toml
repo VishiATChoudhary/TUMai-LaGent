@@ -1,0 +1,40 @@
+[tool.poetry]
+name = "tumai-lagent"
+version = "0.1.0"
+description = ""
+authors = ["VishiATChoudhary <vishisht.choudhary@rwth-aachen.de>"]
+readme = "README.md"
+packages = [
+    {include = "agentic"},
+    {include = "stt"}
+]
+
+[tool.poetry.dependencies]
+python = ">=3.10,<4.0"
+fastapi = "0.109.2"
+uvicorn = "0.27.1"
+langchain = ">=0.1.12"
+langchain-core = ">=0.3.49,<0.4.0"
+pydantic = ">=2.10.0,<3.0.0"
+python-dotenv = "1.0.1"
+torch = ">=2.0.0"
+transformers = ">=4.36.0"
+sounddevice = ">=0.4.6"
+soundfile = ">=0.12.1"
+pyqt6 = ">=6.4.0"
+numpy = ">=1.24.0"
+datasets = ">=2.14.0"
+accelerate = ">=0.26.0"
+ffmpeg-python = ">=0.2.0"
+langchain-mistralai = ">=0.0.7"
+langgraph = ">=0.0.20"
+langchain-aws = ">=0.2.18,<0.3.0"
+boto3 = ">=1.34.0"
+ipykernel = "^6.29.5"
+langchain-community = "^0.3.21"
+langchain-experimental = "^0.3.4"
+html5lib = "^1.1"
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
